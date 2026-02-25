@@ -5,12 +5,11 @@ from pathlib import Path
 
 import soundfile
 import torch
-from deepspeed import DeepSpeedConfig
 from torch import Tensor
 from tqdm import tqdm
 
 from ..data import create_dataloaders, mix_fg_bg
-from ..utils import Engine, TrainLoop, save_mels, setup_logging, tree_map
+from ..utils import TrainLoop, save_mels, setup_logging, tree_map
 from ..utils.distributed import is_local_leader
 from .enhancer import Enhancer
 from .hparams import HParams
@@ -18,6 +17,9 @@ from .univnet.discriminator import Discriminator
 
 
 def load_G(run_dir: Path, hp: HParams | None = None, training=True):
+    from deepspeed import DeepSpeedConfig
+
+    from ..utils import Engine
     if hp is None:
         hp = HParams.load(run_dir)
         assert isinstance(hp, HParams)
@@ -31,6 +33,9 @@ def load_G(run_dir: Path, hp: HParams | None = None, training=True):
 
 
 def load_D(run_dir: Path, hp: HParams | None):
+    from deepspeed import DeepSpeedConfig
+
+    from ..utils import Engine
     if hp is None:
         hp = HParams.load(run_dir)
         assert isinstance(hp, HParams)

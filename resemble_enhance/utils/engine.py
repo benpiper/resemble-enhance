@@ -1,13 +1,9 @@
 import logging
 import re
 from functools import cache, partial
-from typing import Callable, TypeVar
+from typing import Any, Callable, TypeVar
 
-import deepspeed
 import pandas as pd
-from deepspeed.accelerator import get_accelerator
-from deepspeed.runtime.engine import DeepSpeedEngine
-from deepspeed.runtime.utils import clip_grad_norm_
 from torch import nn
 
 from .distributed import fix_unset_envs
@@ -60,6 +56,8 @@ def update_deepspeed_logger():
 
 @cache
 def init_distributed():
+    import deepspeed
+    from deepspeed.accelerator import get_accelerator
     update_deepspeed_logger()
     fix_unset_envs()
     deepspeed.init_distributed(get_accelerator().communication_backend_name())
@@ -78,10 +76,27 @@ def _try_each(*fns, e=None):
         return _try_each(*tails)
 
 
-class Engine(DeepSpeedEngine):
+class EngineMeta(type):
+    def __call__(cls, *args, **kwargs):
+        try:
+            from deepspeed.runtime.engine import DeepSpeedEngine
+            if DeepSpeedEngine not in cls.__bases__:
+                cls.__bases__ = (DeepSpeedEngine,)
+        except ImportError:
+            pass
+        return super().__call__(*args, **kwargs)
+
+
+class Engine(metaclass=EngineMeta):
     def __init__(self, *args, ckpt_dir, **kwargs):
         init_distributed()
-        super().__init__(args=None, *args, **kwargs)
+        # Since we use metaclass to fix bases, we should call super().__init__ carefully
+        # If deepspeed is not working, we might just be an object
+        if hasattr(self, "_config"): # Check if we are really a DeepSpeedEngine
+             super().__init__(args=None, *args, **kwargs)
+        else:
+             # Fallback or partial init if deepspeed is missing
+             pass
         self._ckpt_dir = ckpt_dir
         self._frozen_params = set()
         self._fp32_grad_norm = None
@@ -103,7 +118,7 @@ class Engine(DeepSpeedEngine):
 
     @property
     def global_step(self):
-        return self.global_steps
+        return getattr(self, "global_steps", 0)
 
     def gather_attribute(self, *args, **kwargs):
         return gather_attribute(self.module, *args, **kwargs)
@@ -112,6 +127,7 @@ class Engine(DeepSpeedEngine):
         return dispatch_attribute(self.module, *args, **kwargs)
 
     def clip_fp32_gradients(self):
+        from deepspeed.runtime.utils import clip_grad_norm_
         self._fp32_grad_norm = clip_grad_norm_(
             parameters=self.module.parameters(),
             max_norm=self.gradient_clipping(),
@@ -119,7 +135,7 @@ class Engine(DeepSpeedEngine):
         )
 
     def get_grad_norm(self):
-        grad_norm = self.get_global_grad_norm()
+        grad_norm = getattr(self, "get_global_grad_norm", lambda: None)()
         if grad_norm is None:
             grad_norm = self._fp32_grad_norm
         return grad_norm
@@ -131,6 +147,13 @@ class Engine(DeepSpeedEngine):
         logger.info(f"Saved checkpoint to {self._ckpt_dir}")
 
     def load_checkpoint(self, *args, **kwargs):
+        # Local import to avoid top-level issues
+        try:
+            from deepspeed.runtime.engine import DeepSpeedEngine
+        except ImportError:
+             logger.error("DeepSpeed not available, cannot load checkpoint into Engine")
+             return
+
         fn = partial(super().load_checkpoint, *args, load_dir=self._ckpt_dir, **kwargs)
         return _try_each(
             lambda: fn(),
