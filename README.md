@@ -71,6 +71,20 @@ Which approach is better depends heavily on the specific noise profile of your a
 * **Use Pre-cleaning (Dedicated external utilities)** for extreme continuous noise (e.g., severe traffic, heavy tape hiss) where the speech is barely audible. Pre-cleaning prevents the generative enhancer model from hallucinating speech sounds out of heavy noise.
 * **Use the Built-in Denoiser** for moderate or highly variable noise (e.g., a typical imperfect room recording, keyboard clicks, background chatter). The built-in denoiser was explicitly trained alongside the enhancer, so they have a native synergy that prevents weird "underwater" phase artifacts often introduced by aggressive third-party spectral subtraction tools.
 
+#### Troubleshooting
+
+**What to do if the enhanced audio sounds like gibberish, even with optimal settings?**
+The Latent Conditional Flow Matching (LCFM) model relies heavily on the structure of human speech. If the model outputs metallic, scrambled, or "gibberish" audio despite using ideal slider settings (e.g., Denoising Strength = 0.5, Tau = 0.5), it is usually due to the input signal confusing the generative process:
+
+1. **Overlapping Speech or Background Voices:** Resemble Enhance is designed to enhance a single primary speaker. If multiple people are talking at once, or if there is distinct background chatter, the model may attempt to "merge" the voices or enhance a background conversation, resulting in scrambled, gibberish output.
+    * **How to resolve:** Use a dedicated stem-separation or dialogue isolation tool to isolate the primary speaker's voice before processing it with Resemble Enhance.
+2. **Extreme Clipping (Distortion):** If the input audio is severely clipped (peaking above 0 dBFS, which creates a flattened square wave), the generative model will struggle to interpret the distorted formants and will output strange artifacts.
+    * **How to resolve:** Apply a dedicated de-clipper utility to restore the waveform peaks *before* running the audio through Resemble Enhance.
+3. **Non-Speech Audio:** Resemble Enhance is strictly a *speech* enhancer. If you feed it music, singing, or isolated environmental noise (like a running faucet) without discernible speech, the model will still try to aggressively force the audio into a speech-like structure, leading to bizarre sounds.
+    * **How to resolve:** Ensure you are only feeding spoken word/dialogue into the model. If a clip contains sections of pure music or noise, cut or mute those sections beforehand.
+4. **Severely Degraded Intelligibility:** If the source audio is so degraded (e.g., 8kHz telephone audio with heavy compression) that you can barely understand the words yourself, the model lacks the structural data it needs as a guide and will frequently guess incorrectly (hallucination).
+    * **How to resolve:** Lower the **Denoising Strength** slider (e.g. to `0.1` or `0.2`) to mask the hallucinations by blending the original signal back in. Pre-cleaning with external EQ or noise reduction before enhancement is also highly recommended.
+
 ## Train your own model
 
 ### Data Preparation
