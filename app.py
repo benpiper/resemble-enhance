@@ -10,14 +10,31 @@ else:
     device = "cpu"
 
 
-def _fn(path, solver, nfe, tau, lambd):
-    if path is None:
+def _fn(audio, solver, nfe, tau, lambd):
+    if audio is None:
         return None, None
 
+    sr, y = audio
+
+    # Convert to tensor and shape (channels, frames)
+    if y.ndim == 1:
+        y = y[None, :]
+    else:
+        y = y.T
+
+    dwav = torch.from_numpy(y)
+
+    # Convert commonly returned int formats to standard float32 [-1.0, 1.0]
+    if dwav.dtype == torch.int16:
+        dwav = dwav.float() / 32768.0
+    elif dwav.dtype == torch.int32:
+        dwav = dwav.float() / 2147483648.0
+    else:
+        dwav = dwav.float()
+        
     solver = solver.lower()
     nfe = int(nfe)
 
-    dwav, sr = torchaudio.load(path)
     dwav = dwav.mean(dim=0)
 
     wav1, new_sr = denoise(dwav, sr, device)
@@ -31,7 +48,7 @@ def _fn(path, solver, nfe, tau, lambd):
 
 def main():
     inputs: list = [
-        gr.Audio(type="filepath", label="Input Audio"),
+        gr.Audio(type="numpy", label="Input Audio"),
         gr.Dropdown(choices=["Midpoint", "RK4", "Euler"], value="Midpoint", label="CFM ODE Solver"),
         gr.Slider(minimum=1, maximum=128, value=64, step=1, label="CFM Number of Function Evaluations"),
         gr.Slider(minimum=0, maximum=1, value=0.5, step=0.01, label="CFM Prior Temperature"),
