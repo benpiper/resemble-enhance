@@ -1,6 +1,11 @@
-import gradio as gr
+import base64
+import io
+import dash
+from dash import dcc, html, Input, Output, State, callback_context
+import dash_bootstrap_components as dbc
 import torch
 import torchaudio
+import scipy.io.wavfile
 
 from resemble_enhance.enhancer.inference import denoise, enhance
 
@@ -9,84 +14,178 @@ if torch.cuda.is_available():
 else:
     device = "cpu"
 
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+app.title = "Resemble Enhance"
 
-def _fn(audio, start_seq, end_seq, solver, nfe, tau, lambd):
-    if audio is None:
-        return None, None
-
-    sr, y = audio
-
-    # Calculate actual start and end frames
-    start_frame = int(start_seq * sr)
+app.layout = dbc.Container([
+    dbc.Row(dbc.Col(html.H1("Resemble Enhance", className="text-center mt-4 mb-2"))),
+    dbc.Row(dbc.Col(html.P("AI-driven audio enhancement for your audio files, powered by Resemble AI.", className="text-center text-muted mb-4"))),
     
-    if y.ndim == 1:
-        if end_seq > 0:
-            end_frame = int(end_seq * sr)
-            y = y[start_frame:end_frame]
-        else:
-            y = y[start_frame:]
-        y = y[None, :]
-    else:
-        if end_seq > 0:
-            end_frame = int(end_seq * sr)
-            y = y[start_frame:end_frame, :]
-        else:
-            y = y[start_frame:, :]
-        y = y.T
-
-    if y.size == 0 or y.shape[-1] == 0:
-        return None, None
+    dbc.Row([
+        dbc.Col([
+            dbc.Card([
+                dbc.CardHeader("Input Audio & Settings"),
+                dbc.CardBody([
+                    dcc.Upload(
+                        id='upload-audio',
+                        children=html.Div(['Drag and Drop or ', html.A('Select an Audio File')]),
+                        style={
+                            'width': '100%', 'height': '60px', 'lineHeight': '60px',
+                            'borderWidth': '1px', 'borderStyle': 'dashed',
+                            'borderRadius': '5px', 'textAlign': 'center', 'margin-bottom': '15px'
+                        }
+                    ),
+                    html.Div(id='upload-status', className="text-success mb-3", style={'fontWeight': 'bold'}),
+                    
+                    html.Label("Trim Start Time (seconds)"),
+                    dcc.Input(id='trim-start', type='number', value=0.0, step=0.1, className="form-control mb-3"),
+                    
+                    html.Label("Trim End Time (seconds, 0 = end)"),
+                    dcc.Input(id='trim-end', type='number', value=0.0, step=0.1, className="form-control mb-3"),
+                    
+                    html.Label("CFM ODE Solver"),
+                    dcc.Dropdown(
+                        id='solver-dropdown',
+                        options=[
+                            {'label': 'Midpoint', 'value': 'Midpoint'},
+                            {'label': 'RK4', 'value': 'RK4'},
+                            {'label': 'Euler', 'value': 'Euler'}
+                        ],
+                        value='Midpoint',
+                        className="mb-3"
+                    ),
+                    
+                    html.Label("CFM Number of Function Evaluations"),
+                    dcc.Slider(id='nfe-slider', min=1, max=128, step=1, value=64,
+                               tooltip={"placement": "bottom", "always_visible": True}, className="mb-3"),
+                    
+                    html.Label("CFM Prior Temperature"),
+                    dcc.Slider(id='tau-slider', min=0, max=1, step=0.01, value=0.5,
+                               marks={0: '0', 0.5: '0.5', 1: '1'},
+                               tooltip={"placement": "bottom", "always_visible": True}, className="mb-3"),
+                               
+                    html.Label("Denoising Strength (Does not affect Output Denoised Audio)"),
+                    dcc.Slider(id='lambd-slider', min=0, max=1, step=0.01, value=0.5,
+                               marks={0: '0', 0.5: '0.5', 1: '1'},
+                               tooltip={"placement": "bottom", "always_visible": True}, className="mb-4"),
+                               
+                    dbc.Button("Enhance Audio", id='submit-button', color="primary", className="w-100", n_clicks=0),
+                ])
+            ], className="mb-4")
+        ], md=6),
         
-    dwav = torch.from_numpy(y)
+        dbc.Col([
+            dbc.Card([
+                dbc.CardHeader("Outputs"),
+                dbc.CardBody([
+                    dcc.Loading(
+                        id="loading-outputs",
+                        type="circle",
+                        children=[
+                            html.H5("Output Denoised Audio", className="mt-2"),
+                            html.Audio(id='output-denoised', controls=True, style={'width': '100%'}, className="mb-4"),
+                            
+                            html.H5("Output Enhanced Audio"),
+                            html.Audio(id='output-enhanced', controls=True, style={'width': '100%'})
+                        ]
+                    )
+                ])
+            ])
+        ], md=6)
+    ])
+], fluid=True, style={'maxWidth': '1200px'})
 
-    # Convert commonly returned int formats to standard float32 [-1.0, 1.0]
-    if dwav.dtype == torch.int16:
-        dwav = dwav.float() / 32768.0
-    elif dwav.dtype == torch.int32:
-        dwav = dwav.float() / 2147483648.0
+def parse_audio(contents):
+    content_type, content_string = contents.split(',')
+    decoded = base64.b64decode(content_string)
+    
+    # Load audio from memory buffer
+    buffer = io.BytesIO(decoded)
+    dwav, sr = torchaudio.load(buffer)
+    return dwav, sr
+
+def create_data_uri(wav_tensor, sr):
+    buffer = io.BytesIO()
+    # Scipy expects (frames, channels) and a numpy array
+    wav_np = wav_tensor.cpu().numpy()
+    if wav_np.ndim == 1:
+        pass # already 1D
     else:
-        dwav = dwav.float()
+        wav_np = wav_np.T # usually torchaudio gives (channels, frames) so transpose back if needed but enhance gives 1D
         
-    solver = solver.lower()
-    nfe = int(nfe)
+    scipy.io.wavfile.write(buffer, sr, wav_np)
+    buffer.seek(0)
+    encoded = base64.b64encode(buffer.read()).decode('ascii')
+    return f"data:audio/wav;base64,{encoded}"
 
-    dwav = dwav.mean(dim=0)
+@app.callback(
+    Output('upload-status', 'children'),
+    Input('upload-audio', 'filename')
+)
+def update_upload_status(filename):
+    if filename:
+        return f"Loaded: {filename}"
+    return ""
 
-    wav1, new_sr = denoise(dwav, sr, device)
-    wav2, new_sr = enhance(dwav, sr, device, nfe=nfe, solver=solver, lambd=lambd, tau=tau)
+@app.callback(
+    [Output('output-denoised', 'src'),
+     Output('output-enhanced', 'src')],
+    [Input('submit-button', 'n_clicks')],
+    [State('upload-audio', 'contents'),
+     State('trim-start', 'value'),
+     State('trim-end', 'value'),
+     State('solver-dropdown', 'value'),
+     State('nfe-slider', 'value'),
+     State('tau-slider', 'value'),
+     State('lambd-slider', 'value')]
+)
+def process_audio(n_clicks, audio_contents, start_seq, end_seq, solver, nfe, tau, lambd):
+    # Only run if button was clicked and file is uploaded
+    if n_clicks == 0 or audio_contents is None:
+        return dash.no_update, dash.no_update
+        
+    try:
+        # 1. Parse base64 audio
+        dwav, sr = parse_audio(audio_contents)
+        
+        # 2. Trim audio
+        start_frame = int(start_seq * sr)
+        
+        if dwav.ndim == 1:
+            if end_seq > 0:
+                end_frame = int(end_seq * sr)
+                dwav = dwav[start_frame:end_frame]
+            else:
+                dwav = dwav[start_frame:]
+        else: # (channels, frames)
+            if end_seq > 0:
+                end_frame = int(end_seq * sr)
+                dwav = dwav[:, start_frame:end_frame]
+            else:
+                dwav = dwav[:, start_frame:]
+                
+        # Downmix to mono if stereo
+        dwav = dwav.mean(dim=0)
+        
+        if dwav.numel() == 0:
+            return dash.no_update, dash.no_update
 
-    wav1 = wav1.cpu().numpy()
-    wav2 = wav2.cpu().numpy()
+        # 3. Process
+        solver = solver.lower()
+        nfe = int(nfe)
+        
+        wav1, new_sr = denoise(dwav, sr, device)
+        wav2, new_sr = enhance(dwav, sr, device, nfe=nfe, solver=solver, lambd=lambd, tau=tau)
+        
+        # 4. Encode outputs
+        src_denoised = create_data_uri(wav1, new_sr)
+        src_enhanced = create_data_uri(wav2, new_sr)
+        
+        return src_denoised, src_enhanced
+        
+    except Exception as e:
+        print(f"Error processing audio: {e}")
+        return dash.no_update, dash.no_update
 
-    return (new_sr, wav1), (new_sr, wav2)
-
-
-def main():
-    inputs: list = [
-        gr.Audio(type="numpy", label="Input Audio", editable=False),
-        gr.Number(value=0.0, label="Trim Start Time (seconds)"),
-        gr.Number(value=0.0, label="Trim End Time (seconds, 0 = end)"),
-        gr.Dropdown(choices=["Midpoint", "RK4", "Euler"], value="Midpoint", label="CFM ODE Solver"),
-        gr.Slider(minimum=1, maximum=128, value=64, step=1, label="CFM Number of Function Evaluations"),
-        gr.Slider(minimum=0, maximum=1, value=0.5, step=0.01, label="CFM Prior Temperature"),
-        gr.Slider(minimum=0, maximum=1, value=0.5, step=0.01, label="Denoising Strength"),
-    ]
-
-    outputs: list = [
-        gr.Audio(label="Output Denoised Audio"),
-        gr.Audio(label="Output Enhanced Audio"),
-    ]
-
-    interface = gr.Interface(
-        fn=_fn,
-        title="Resemble Enhance",
-        description="AI-driven audio enhancement for your audio files, powered by Resemble AI.",
-        inputs=inputs,
-        outputs=outputs,
-    )
-
-    interface.launch(server_name="0.0.0.0")
-
-
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    app.run_server(debug=True, host='0.0.0.0', port=7861)
