@@ -188,4 +188,4 @@ def process_audio(n_clicks, audio_contents, start_seq, end_seq, solver, nfe, tau
         return dash.no_update, dash.no_update
 
 if __name__ == '__main__':
-    app.run_server(debug=True, host='0.0.0.0', port=7861)
+    app.run(debug=True, host='0.0.0.0', port=7861)
