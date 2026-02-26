@@ -6,6 +6,8 @@ import dash_bootstrap_components as dbc
 import torch
 import torchaudio
 import scipy.io.wavfile
+import numpy as np
+import plotly.graph_objects as go
 
 from resemble_enhance.enhancer.inference import denoise, enhance
 
@@ -37,11 +39,18 @@ app.layout = dbc.Container([
                     ),
                     html.Div(id='upload-status', className="text-success mb-3", style={'fontWeight': 'bold'}),
                     
-                    html.Label("Trim Start Time (seconds)"),
-                    dcc.Input(id='trim-start', type='number', value=0.0, step=0.1, className="form-control mb-3"),
-                    
-                    html.Label("Trim End Time (seconds, 0 = end)"),
-                    dcc.Input(id='trim-end', type='number', value=0.0, step=0.1, className="form-control mb-3"),
+                    html.Div(id='waveform-container', style={'display': 'none'}, children=[
+                        html.Label("Trim Audio:"),
+                        dcc.Graph(id='waveform-graph', config={'displayModeBar': False}, style={'height': '150px'}),
+                        dcc.RangeSlider(
+                            id='trim-slider',
+                            min=0, max=100, step=0.01,
+                            value=[0, 100],
+                            tooltip={"placement": "bottom", "always_visible": True},
+                            marks=None,
+                            className="mb-4"
+                        )
+                    ]),
                     
                     html.Label("CFM ODE Solver"),
                     dcc.Dropdown(
@@ -119,27 +128,82 @@ def create_data_uri(wav_tensor, sr):
     return f"data:audio/wav;base64,{encoded}"
 
 @app.callback(
-    Output('upload-status', 'children'),
-    Input('upload-audio', 'filename')
+    [Output('upload-status', 'children'),
+     Output('waveform-container', 'style'),
+     Output('waveform-graph', 'figure'),
+     Output('trim-slider', 'min'),
+     Output('trim-slider', 'max'),
+     Output('trim-slider', 'value')],
+    Input('upload-audio', 'contents'),
+    State('upload-audio', 'filename')
 )
-def update_upload_status(filename):
-    if filename:
-        return f"Loaded: {filename}"
-    return ""
+def update_waveform(contents, filename):
+    if not contents:
+        return "", {'display': 'none'}, dash.no_update, 0, 100, [0, 100]
+        
+    try:
+        dwav, sr = parse_audio(contents)
+        
+        # Determine total duration
+        duration = dwav.shape[-1] / sr
+        
+        # Prepare waveform for fast plotting
+        # Downmix to mono and convert to numpy
+        if dwav.ndim > 1:
+            y = dwav.mean(dim=0).cpu().numpy()
+        else:
+            y = dwav.cpu().numpy()
+            
+        # Target 2000 points max for plotting speed
+        n_points = 2000
+        if len(y) > n_points:
+            # Envelope block max pooling
+            chunk_size = len(y) // n_points
+            y_pad = np.pad(y, (0, chunk_size - len(y) % chunk_size), mode='constant')
+            y_pool = y_pad.reshape(-1, chunk_size).max(axis=1)
+        else:
+            y_pool = y
+            
+        time_axis = np.linspace(0, duration, len(y_pool))
+        
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=time_axis, y=y_pool, 
+            mode='lines', 
+            fill='tozeroy',
+            line=dict(color='#007bff', width=1),
+            fillcolor='rgba(0,123,255,0.2)'
+        ))
+        
+        fig.update_layout(
+            margin=dict(l=0, r=0, t=10, b=0),
+            xaxis_title=None,
+            yaxis_title=None,
+            xaxis=dict(showgrid=False, zeroline=False, fixedrange=True),
+            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, fixedrange=True),
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+        )
+        
+        return f"Loaded: {filename} ({duration:.1f}s)", {'display': 'block'}, fig, 0.0, duration, [0.0, duration]
+    
+    except Exception as e:
+        print(f"Error drawing waveform: {e}")
+        return f"Error loading {filename}", {'display': 'none'}, dash.no_update, 0, 100, [0, 100]
+
 
 @app.callback(
     [Output('output-denoised', 'src'),
      Output('output-enhanced', 'src')],
     [Input('submit-button', 'n_clicks')],
     [State('upload-audio', 'contents'),
-     State('trim-start', 'value'),
-     State('trim-end', 'value'),
+     State('trim-slider', 'value'),
      State('solver-dropdown', 'value'),
      State('nfe-slider', 'value'),
      State('tau-slider', 'value'),
      State('lambd-slider', 'value')]
 )
-def process_audio(n_clicks, audio_contents, start_seq, end_seq, solver, nfe, tau, lambd):
+def process_audio(n_clicks, audio_contents, trim_values, solver, nfe, tau, lambd):
     # Only run if button was clicked and file is uploaded
     if n_clicks == 0 or audio_contents is None:
         return dash.no_update, dash.no_update
@@ -149,20 +213,14 @@ def process_audio(n_clicks, audio_contents, start_seq, end_seq, solver, nfe, tau
         dwav, sr = parse_audio(audio_contents)
         
         # 2. Trim audio
+        start_seq, end_seq = trim_values[0], trim_values[1]
         start_frame = int(start_seq * sr)
+        end_frame = int(end_seq * sr)
         
         if dwav.ndim == 1:
-            if end_seq > 0:
-                end_frame = int(end_seq * sr)
-                dwav = dwav[start_frame:end_frame]
-            else:
-                dwav = dwav[start_frame:]
+            dwav = dwav[start_frame:end_frame]
         else: # (channels, frames)
-            if end_seq > 0:
-                end_frame = int(end_seq * sr)
-                dwav = dwav[:, start_frame:end_frame]
-            else:
-                dwav = dwav[:, start_frame:]
+            dwav = dwav[:, start_frame:end_frame]
                 
         # Downmix to mono if stereo
         dwav = dwav.mean(dim=0)
