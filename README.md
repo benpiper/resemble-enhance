@@ -39,19 +39,19 @@ resemble-enhance in_dir out_dir --denoise_only
 
 ### Web Demo
 
-We provide a web demo built with Gradio, you can try it out [here](https://huggingface.co/spaces/ResembleAI/resemble-enhance), or also run it locally:
+We provide a web demo built with Streamlit, you can try it out [here](https://huggingface.co/spaces/ResembleAI/resemble-enhance), or also run it locally:
 
 ```
-python app.py
+streamlit run app.py
 ```
 
-By default, the script listens on `127.0.0.1`. To make it accessible across your local network, you can modify `app.py` to use `interface.launch(server_name="0.0.0.0")`.
+By default, the script listens on `127.0.0.1`. To make it accessible across your local network, you can modify the command to `streamlit run app.py --server.address 0.0.0.0`.
 
-#### Gradio Settings
+#### Web Settings
 
 The web demo provides several advanced settings that directly impact the output quality and speech accuracy:
 
-- **Trim Start / End Time:** You can manually crop the input audio by specifying a start and end time (in seconds). This is useful for removing long silences before processing, as the built-in Gradio waveform trimmer currently has an upstream bug that generates silent files. Leaving End Time at `0` processes until the end of the file.
+- **Trim Audio:** You can manually crop the input audio by clicking and dragging a region directly on the interactive waveform. This is useful for removing long silences before processing. If no region is drawn, it processes until the end of the file.
 - **CFM ODE Solver** (`Midpoint`, `RK4`, `Euler`): Selects the numerical solver for the Conditional Flow Matching (CFM) model. `Midpoint` is the default and provides a good balance between speed and quality. `RK4` is more computationally expensive but can yield highly accurate and detailed speech. `Euler` is the fastest but may result in lower quality and more audio artifacts.
 - **CFM Number of Function Evaluations (NFE)** (Range: 1-128, Default: 64): Determines the number of steps the solver takes. A higher NFE generally results in better speech accuracy, fewer artifacts, and more natural-sounding audio, though it will take longer to process. Lowering this value speeds up generation but can noticeably degrade clarity.
 - **CFM Prior Temperature (Tau)** (Range: 0-1, Default: 0.5): Controls the amount of variance or randomness applied during the enhancement process. A lower value (e.g., closer to 0) makes the output more deterministic and stable, which helps in preserving exact speech patterns and minimizing unwanted artifacts. A higher value introduces more high-frequency details and variability, which can sometimes make the voice sound more natural but risks introducing artifacts or slight alterations in speech accuracy.
