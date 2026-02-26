@@ -69,7 +69,7 @@ def main():
         gr.Dropdown(choices=["Midpoint", "RK4", "Euler"], value="Midpoint", label="CFM ODE Solver"),
         gr.Slider(minimum=1, maximum=128, value=64, step=1, label="CFM Number of Function Evaluations"),
         gr.Slider(minimum=0, maximum=1, value=0.5, step=0.01, label="CFM Prior Temperature"),
-        gr.Slider(minimum=0, maximum=1, value=0.5, step=0.01, label="Denoising Strength"),
+        gr.Slider(minimum=0, maximum=1, value=0.5, step=0.01, label="Denoising Strength (Does not affect Output Denoised Audio)"),
     ]
 
     outputs: list = [
