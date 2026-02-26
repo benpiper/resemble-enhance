@@ -41,6 +41,7 @@ app.layout = dbc.Container([
                     
                     html.Div(id='waveform-container', style={'display': 'none'}, children=[
                         html.Label("Trim Audio:"),
+                        html.Audio(id='source-audio', controls=True, style={'width': '100%'}, className="mb-2"),
                         dcc.Graph(id='waveform-graph', config={'displayModeBar': False}, style={'height': '150px'}),
                         dcc.RangeSlider(
                             id='trim-slider',
@@ -130,6 +131,7 @@ def create_data_uri(wav_tensor, sr):
 @app.callback(
     [Output('upload-status', 'children'),
      Output('waveform-container', 'style'),
+     Output('source-audio', 'src'),
      Output('waveform-graph', 'figure'),
      Output('trim-slider', 'min'),
      Output('trim-slider', 'max'),
@@ -139,7 +141,7 @@ def create_data_uri(wav_tensor, sr):
 )
 def update_waveform(contents, filename):
     if not contents:
-        return "", {'display': 'none'}, dash.no_update, 0, 100, [0, 100]
+        return "", {'display': 'none'}, dash.no_update, dash.no_update, 0, 100, [0, 100]
         
     try:
         dwav, sr = parse_audio(contents)
@@ -185,11 +187,11 @@ def update_waveform(contents, filename):
             paper_bgcolor='rgba(0,0,0,0)',
         )
         
-        return f"Loaded: {filename} ({duration:.1f}s)", {'display': 'block'}, fig, 0.0, duration, [0.0, duration]
+        return f"Loaded: {filename} ({duration:.1f}s)", {'display': 'block'}, contents, fig, 0.0, duration, [0.0, duration]
     
     except Exception as e:
         print(f"Error drawing waveform: {e}")
-        return f"Error loading {filename}", {'display': 'none'}, dash.no_update, 0, 100, [0, 100]
+        return f"Error loading {filename}", {'display': 'none'}, dash.no_update, dash.no_update, 0, 100, [0, 100]
 
 
 @app.callback(
