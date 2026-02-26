@@ -10,18 +10,33 @@ else:
     device = "cpu"
 
 
-def _fn(audio, solver, nfe, tau, lambd):
+def _fn(audio, start_seq, end_seq, solver, nfe, tau, lambd):
     if audio is None:
         return None, None
 
     sr, y = audio
 
-    # Convert to tensor and shape (channels, frames)
+    # Calculate actual start and end frames
+    start_frame = int(start_seq * sr)
+    
     if y.ndim == 1:
+        if end_seq > 0:
+            end_frame = int(end_seq * sr)
+            y = y[start_frame:end_frame]
+        else:
+            y = y[start_frame:]
         y = y[None, :]
     else:
+        if end_seq > 0:
+            end_frame = int(end_seq * sr)
+            y = y[start_frame:end_frame, :]
+        else:
+            y = y[start_frame:, :]
         y = y.T
 
+    if y.size == 0 or y.shape[-1] == 0:
+        return None, None
+        
     dwav = torch.from_numpy(y)
 
     # Convert commonly returned int formats to standard float32 [-1.0, 1.0]
@@ -48,7 +63,9 @@ def _fn(audio, solver, nfe, tau, lambd):
 
 def main():
     inputs: list = [
-        gr.Audio(type="numpy", label="Input Audio"),
+        gr.Audio(type="numpy", label="Input Audio", editable=False),
+        gr.Number(value=0.0, label="Trim Start Time (seconds)"),
+        gr.Number(value=0.0, label="Trim End Time (seconds, 0 = end)"),
         gr.Dropdown(choices=["Midpoint", "RK4", "Euler"], value="Midpoint", label="CFM ODE Solver"),
         gr.Slider(minimum=1, maximum=128, value=64, step=1, label="CFM Number of Function Evaluations"),
         gr.Slider(minimum=0, maximum=1, value=0.5, step=0.01, label="CFM Prior Temperature"),
