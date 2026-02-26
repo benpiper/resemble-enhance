@@ -10,28 +10,17 @@ else:
     device = "cpu"
 
 
-def _fn(path, solver, nfe, tau, lambd, denoising):
+def _fn(path, solver, nfe, tau, denoising):
     if path is None:
         return None, None
 
     solver = solver.lower()
     nfe = int(nfe)
-    lambd = float(lambd)
+    lambd = 0.9 if denoising else 0.1
 
     dwav, sr = torchaudio.load(path)
     dwav = dwav.mean(dim=0)
 
-    if denoising:
-        wav1, new_sr = denoise(dwav, sr, device)
-        # Pass the denoised audio (wav1) to the enhancer to prevent double-noising issues,
-        # but the original code passed dwav. We'll stick to the original flow for now,
-        # which passes the UN-denoised dwav stream directly into enhance() which wraps denoise() internally.
-    else:
-        # Just a placeholder if denoising is off, the original code always ran denoise anyway 
-        # but only returned it. Let's keep it simple.
-        wav1, new_sr = dwav, sr # Or whatever the original behavior intended, actually it always denoised.
-        
-    # Reverting to exact original logic but with explicit lambd:
     wav1, new_sr = denoise(dwav, sr, device)
     wav2, new_sr = enhance(dwav, sr, device, nfe=nfe, solver=solver, lambd=lambd, tau=tau)
 
@@ -47,7 +36,6 @@ def main():
         gr.Dropdown(choices=["Midpoint", "RK4", "Euler"], value="Midpoint", label="CFM ODE Solver"),
         gr.Slider(minimum=1, maximum=128, value=64, step=1, label="CFM Number of Function Evaluations"),
         gr.Slider(minimum=0, maximum=1, value=0.5, step=0.01, label="CFM Prior Temperature"),
-        gr.Slider(minimum=0, maximum=1, value=0.1, step=0.01, label="CFM Denoise Strength / Guidance (Lambda)"),
         gr.Checkbox(value=False, label="Denoise Before Enhancement"),
     ]
 
