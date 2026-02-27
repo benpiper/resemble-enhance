@@ -114,7 +114,7 @@ def main():
             # We must parse it to determine duration and pass to the plugin
             file_bytes = audio_source.read()
             buffer = io.BytesIO(file_bytes)
-            dwav, sr = torchaudio.load(buffer)
+            dwav, sr = torchaudio.load(buffer, backend="soundfile")
             duration = dwav.shape[-1] / sr
             
             # The Advanced Audio component handles the UI and Trimming interactions
