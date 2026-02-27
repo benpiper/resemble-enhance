@@ -5,9 +5,7 @@ import torchaudio
 import scipy.io.wavfile
 import numpy as np
 
-# We'll use the advanced audio component for visual region trimming
-from audiorecorder import audiorecorder
-import streamlit.components.v1 as components
+
 
 from resemble_enhance.enhancer.inference import denoise, enhance
 
@@ -101,12 +99,20 @@ def main():
     # Main layout
     st.subheader("Input Audio")
     
-    uploaded_file = st.file_uploader("Upload an audio file", type=["wav", "mp3", "flac", "ogg"])
+    tab1, tab2 = st.tabs(["Upload File", "Record Microphone"])
     
-    if uploaded_file is not None:
+    with tab1:
+        uploaded_file = st.file_uploader("Upload an audio file", type=["wav", "mp3", "flac", "ogg"])
+        
+    with tab2:
+        recorded_file = st.audio_input("Record an audio clip")
+        
+    audio_source = uploaded_file or recorded_file
+    
+    if audio_source is not None:
         try:
             # We must parse it to determine duration and pass to the plugin
-            file_bytes = uploaded_file.read()
+            file_bytes = audio_source.read()
             buffer = io.BytesIO(file_bytes)
             dwav, sr = torchaudio.load(buffer)
             duration = dwav.shape[-1] / sr
