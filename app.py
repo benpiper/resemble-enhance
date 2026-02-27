@@ -4,8 +4,10 @@ import torch
 import torchaudio
 import scipy.io.wavfile
 import numpy as np
+import warnings
 
-
+# Suppress torchaudio's internal backend dispatch warning triggered by Streamlit's file watcher
+warnings.filterwarnings("ignore", category=UserWarning, module="streamlit.watcher.local_sources_watcher")
 
 from resemble_enhance.enhancer.inference import denoise, enhance
 
